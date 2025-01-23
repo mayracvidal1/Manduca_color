@@ -1,0 +1,441 @@
+---
+title: "Results section with merged data and year as covariate"
+format: html
+editor: visual
+---
+
+# Low and high quality make it High C:N and Low C:N
+
+### importing libraries
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(performance)
+library(broom)
+library(emmeans)
+library(multcomp)
+library(car)
+library(MASS)
+library(DHARMa)
+library(grDevices)
+library(vegan)
+library(cowplot)
+
+# set theme
+theme_set(theme_classic(base_size = 14) + theme(legend.position="none"))
+```
+
+### Importing data
+
+```{r}
+# original performance data sheet
+Performance_Sheet <- read_csv("/Users/mayra/Library/CloudStorage/OneDrive-UniversityofMassachusettsBoston/Manuscripts/Performance.csv") 
+# rename Diet Values
+
+Performance_Sheet[Performance_Sheet == "High-Quality"] <- "N-Rich"
+Performance_Sheet[Performance_Sheet == "Low-Quality"] <- "N-Poor"
+
+# rename Temperature Values
+Performance_Sheet[Performance_Sheet == "18C"] <- "18°C"
+Performance_Sheet[Performance_Sheet == "27C"] <- "27°C"
+
+
+# original color data sheet
+Color_Sheet <- read_csv("/Users/mayra/Library/CloudStorage/OneDrive-UniversityofMassachusettsBoston/Manuscripts/Color.csv") 
+
+# rename Diet Values
+
+Color_Sheet[Color_Sheet == "High-Quality"] <- "N-Rich"
+Color_Sheet[Color_Sheet == "Low-Quality"] <- "N-Poor"
+
+# rename Temperature Values
+Color_Sheet[Color_Sheet == "18C"] <- "18°C"
+Color_Sheet[Color_Sheet == "27C"] <- "27°C"
+
+#  merged performance data
+merged_performance <- Performance_Sheet |> dplyr::select(ID, Diet, Temperature,`Hatch Date`,`Pupa Date`, `Death Date`, `Survived?`, `Development Time`,`Pupal Mass (g)`,`Pupal Mass no mispupation`, `Adult em. Date`, Year)
+# removing spaces
+merged_performance_n <- merged_performance                  
+colnames(merged_performance_n) <- gsub(" ", "_", colnames(merged_performance_n))
+str(merged_performance_n)
+# renaming columns
+merged_performance_manduca_data<- merged_performance_n  |> 
+mutate(ID = as.character(ID),Hatch_Date = mdy(Hatch_Date),Pupa_Date = mdy(Pupa_Date),Death_Date = mdy(Death_Date),Adult_em._Date = mdy(Adult_em._Date),TD = paste("Fed",Diet,"at",Temperature), Growth_Rate = `Pupal_Mass_(g)`/Development_Time,Year = as.character(Year)) |> rename(Pupal_Mass = `Pupal_Mass_(g)`, Survived = `Survived?`)
+
+# merged color data 
+
+Color_Sheet <- Color_Sheet                  
+colnames(Color_Sheet) <- gsub(" ", "_", colnames(Color_Sheet))
+
+merged_color_manduca_data <- Color_Sheet |> dplyr::select(ID:Temperature,Year ,'Size_(px/cm)':Luminance_Variance,) |>  mutate(ID = as.character(ID), Year = as.character(Year)) |> rename("Scale" = 'Size_(px/cm)' ) |> drop_na()
+# removing spaces
+merged_color_manduca_data <- merged_color                 
+colnames(merged_color_manduca_data) <- gsub(" ", "_", colnames(merged_color_manduca_data)) 
+
+```
+
+### Making Linear models
+
+```{r}
+# Fitness
+### merged pupal mass
+merged_pupal_lm <- lm(Pupal_Mass ~ Diet * Temperature 
+                      #new added year
+                      +Year
+                         
+                      , 
+               data = merged_performance_manduca_data)
+
+str(merged_performance_manduca_data)
+
+### merged suvival
+merged_surv_glm <- glm(Survived ~ Diet * Temperature
+                      #new added year
+                      +Year
+                       # *Sex
+                       ,
+                 family = binomial(link = "logit"),
+                 data = merged_performance_manduca_data)
+### merged development time
+merged_dev_lm <- lm(Development_Time ~ Diet * Temperature
+                    # new year
+                    +Year
+                    ,
+               data = merged_performance_manduca_data)
+# color
+## merged_color
+merged_color_lightness_lm <- lm(Luminance_Median ~ Diet * Temperature 
+                         + Scale
+                         # new year
+                         +Year
+                        ,
+               data = merged_color_manduca_data)
+
+test<-lm(Scale~Diet * Temperature + Year, data= merged_color_manduca_data)
+anova(test)
+summary(test)
+
+## merged color with mean
+merged_color_lightness_mean_lm <- lm(Luminance_Mean ~ Diet * Temperature
+                                     + Scale
+                                     # year
+                                     + Year
+                                     ,
+                                     data = merged_color_manduca_data)
+
+# Growth rate
+## merged_growth rate
+merged_growth_rate_lm <- lm(Growth_Rate ~ Diet * Temperature
+                            # year
+                            +Year
+                         
+                        ,
+               data = merged_performance_manduca_data)
+```
+
+### Results
+
+\
+
+#### 1 \| Performance Metrics 
+
+Anova
+
+Pupal mass
+
+```{r}
+# merged
+Anova(merged_pupal_lm)
+
+
+```
+
+survival
+
+```{r}
+# merged
+Anova(merged_surv_glm)
+```
+
+Dev time
+
+```{r}
+# merged
+Anova(merged_dev_lm)
+```
+
+Growth Rate
+
+```{r}
+Anova(merged_growth_rate_lm)
+```
+
+Sidak
+
+Pupal mass
+
+```{r}
+## merged
+merged_pupal_em <- emmeans(merged_pupal_lm, specs = ~ Diet + Temperature)
+merged_pupal_tk_Temp_by_Diet <- cld(merged_pupal_em, adjust = "sidak") |>
+  mutate(.group = letters[as.numeric(.group)]) |>
+  ggplot(mapping = aes(x =  Diet
+                         , y = emmean,
+                       ymin = lower.CL,
+                       ymax = upper.CL,
+                       colour = factor(.group))) +
+  geom_pointrange() +
+  geom_text(mapping = aes(label = .group),
+            y = rep(1,4)) +
+scale_color_manual(values  = c("black","cornflowerblue","honeydew3","snow4")) +
+  facet_grid(~Temperature)
+merged_pupal_tk_Temp_by_Diet
+```
+
+Survival
+
+```{r}
+## merged
+merged_surv_em <- emmeans(merged_surv_glm, specs = ~ Diet + Temperature) 
+merged_surv_tk_Diet_by_Temp <- cld(merged_surv_em, adjust = "sidak") |>
+  mutate(.group = letters[as.numeric(.group)]) |>
+  ggplot(mapping = aes(x =  Temperature
+                         , y = emmean,
+                      ymin = asymp.LCL,
+                       ymax = asymp.UCL,
+                       colour = factor(.group))) +
+  geom_pointrange() +
+  geom_text(mapping = aes(label = .group),
+            y = rep(1,4)) +
+scale_color_manual(values  = c("black","cornflowerblue","honeydew3","snow4")) +
+  facet_grid(~Diet)
+
+merged_surv_tk_Diet_by_Temp
+```
+
+Development time
+
+```{r}
+## merged
+merged_dev_em <- emmeans(merged_dev_lm, specs = ~ Diet + Temperature)
+
+merged_dev_tk_Temp_by_Diet <- cld(merged_dev_em, adjust = "sidak") |>
+  mutate(.group = letters[as.numeric(.group)]) |>
+  ggplot(mapping = aes(x =  Diet
+                         , y = emmean,
+                       ymin = lower.CL,
+                       ymax = upper.CL,
+                       colour = factor(.group))) +
+  geom_pointrange() +
+  geom_text(mapping = aes(label = .group),
+            y = rep(1,4)) +
+scale_color_manual(values  = c("black","cornflowerblue","honeydew3","snow4")) +
+  facet_grid(~Temperature)
+
+merged_dev_tk_Temp_by_Diet
+```
+
+Growth Rate
+
+```{r}
+merged_growth_rate_em <- emmeans(merged_growth_rate_lm, specs = ~ Diet + Temperature)
+
+merged_growth_rate_tk_Temp_by_Diet <- cld(merged_growth_rate_em, adjust = "sidak") |>
+  mutate(.group = letters[as.numeric(.group)]) |>
+  ggplot(mapping = aes(x =  Diet
+                         , y = emmean,
+                       ymin = lower.CL,
+                       ymax = upper.CL,
+                       colour = factor(.group))) +
+  geom_pointrange() +
+  geom_text(mapping = aes(label = .group),
+            y = rep(1,4)) +
+scale_color_manual(values  = c("black","cornflowerblue","honeydew3","snow4")) +
+  facet_grid(~Temperature)
+
+merged_growth_rate_tk_Temp_by_Diet
+```
+
+Original plot
+
+```{r}
+# merged 
+#Pupal_mass
+merged_pm_plot <- ggplot(data = merged_performance_manduca_data,
+                     mapping =
+                       aes(x = Diet, y = Pupal_Mass_no_mispupation, fill = Temperature)) + 
+  geom_boxplot() +
+  facet_wrap(~Temperature)+
+ scale_color_grey()  +
+  scale_fill_manual(values  = c("cornsilk4","lightgray"))+
+  geom_jitter(alpha = 0.5) +
+  scale_y_continuous(limits =c(0,10)) +
+  labs(
+    #title ="Diet and Temperatures effect on Pupal Mass",
+     y = "Pupal Mass(g)" , x = "Treatment" ) #+
+  # trying basic sd error bars
+ # geom_errorbar(data = pm_trial_1_error, aes(ymin = Mean - SD ,ymax = Mean + SD))
+
+merged_pm_plot
+
+
+# Survival
+## merged
+merged_surv_plot <- ggplot(data = merged_performance_manduca_data,
+                     mapping =
+                       aes(x = Diet, y = Survived, shape = Diet, color = Diet)) + 
+  stat_summary(colour = "red") +
+  facet_wrap(~Temperature) +
+   scale_fill_manual(values  = c("cornsilk4","lightgray"))+
+  scale_y_continuous(limits =c(0,1))+
+  labs(
+    #title ="Diet and Temperatures \neffect on Survival",
+     y = "Survival" , x = "Treatment" )
+
+merged_surv_plot
+
+# Development time 
+merged_dev_plot <- ggplot(data = merged_performance_manduca_data,
+                     mapping =
+                       aes(x = Diet, y = Development_Time, fill = Temperature)) + 
+  geom_boxplot() +
+    scale_fill_manual(values  = c("cornsilk4","lightgray"))+
+  geom_jitter(alpha = 0.5) +
+  facet_wrap(~Temperature) +
+ scale_y_continuous(limits =c(0,100)) +
+  labs(
+    #title = "Diet and Temperatures effect \non Development Time",
+     y = "Development Time(days)" , x = "Treatment" )
+
+merged_dev_plot
+
+# Growth Rate
+merged_growth_rate_plot <- ggplot(data = merged_performance_manduca_data,
+                     mapping =
+                       aes(x = Diet, y = Growth_Rate, fill = Diet)) + 
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+ facet_wrap(~Temperature) +
+   scale_fill_manual(values  = c("cornsilk4","lightgray")) +
+labs(y = "Mass(g) / Day " , x = "Treatment" ) +
+  scale_y_continuous(limits =c(0,0.4)) +
+theme(axis.title.y = element_text(size = 11)) 
+
+merged_growth_rate_plot
+
+
+```
+
+New combined plot
+
+merged
+
+```{r}
+fit_plot <- plot_grid(merged_pm_plot,merged_dev_plot,merged_growth_rate_plot, labels=c("A", "B","C"), ncol = 3, nrow = 1)
+
+fit_plot
+```
+
+```{r}
+surv_plot <- plot_grid(merged_surv_plot, ncol = 1, nrow = 1)
+
+surv_plot
+```
+
+\
+
+#### 2 \| Color (lightness) median
+
+\
+Anova
+
+```{r}
+Anova(merged_color_lightness_lm)
+```
+
+Sidak
+
+```{r}
+## merged
+merged_color_lightness_em <- emmeans(merged_color_lightness_lm, specs = ~ Diet + Temperature)
+merged_color_lightness_tk_Temp_by_Diet <- cld(merged_color_lightness_em, adjust = "sidak") %>%
+  mutate(.group = letters[as.numeric(.group)]) %>%
+  ggplot(mapping = aes(x =  Diet
+                         , y = emmean,
+                       ymin = lower.CL,
+                       ymax = upper.CL,
+                       colour = factor(.group))) +
+  geom_pointrange() +
+  geom_text(mapping = aes(label = .group),
+            y = rep(1,4)) +
+scale_color_manual(values  = c("black","cornflowerblue","honeydew3","snow4")) +
+  facet_grid(~Temperature)
+
+merged_color_lightness_tk_Temp_by_Diet
+```
+
+Original plot
+
+```{r}
+## merged
+merged_color_lmed_plot <- ggplot(data = merged_color_manduca_data,
+                     mapping =
+                       aes(x = Diet, y = Luminance_Median, fill = Temperature)) + 
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  scale_y_continuous(limits =c(50,130))+
+  facet_wrap(~Temperature) +
+   scale_fill_manual(values  = c("snow4","lightgrey"))+
+  #scale_y_continuous(limits =c(0,0.10)) +
+  labs(y = "Lightness median" , x = "Treatment" )
+
+merged_color_lmed_plot
+```
+
+#### 2.5 \| Color (lightness) mean
+
+Anova
+
+```{r}
+Anova(merged_color_lightness_mean_lm)
+```
+
+Sidak
+
+```{r}
+## merged
+merged_color_lightness_mean_em <- emmeans(merged_color_lightness_mean_lm, specs = ~ Diet + Temperature)
+merged_color_lightness_mean_tk_Temp_by_Diet <- cld(merged_color_lightness_mean_em, adjust = "sidak") %>%
+  mutate(.group = letters[as.numeric(.group)]) %>%
+  ggplot(mapping = aes(x =  Diet
+                         , y = emmean,
+                       ymin = lower.CL,
+                       ymax = upper.CL,
+                       colour = factor(.group))) +
+  geom_pointrange() +
+  geom_text(mapping = aes(label = .group),
+            y = rep(1,4)) +
+scale_color_manual(values  = c("black","cornflowerblue","honeydew3","snow4")) +
+  facet_grid(~Temperature)
+
+merged_color_lightness_mean_tk_Temp_by_Diet
+```
+
+Original plot
+
+```{r}
+## merged
+merged_color_lmean_plot <- ggplot(data = merged_color_manduca_data,
+                     mapping =
+                       aes(x = Diet, y = Luminance_Mean, fill = Temperature)) + 
+  geom_boxplot() +
+  geom_jitter(alpha = 0.5) +
+  scale_y_continuous(limits =c(50,130))+
+  facet_wrap(~Temperature) +
+   scale_fill_manual(values  = c("snow4","lightgrey"))+
+  #scale_y_continuous(limits =c(0,0.10)) +
+  labs(y = "Lightness mean" , x = "Treatment" )
+
+merged_color_lmean_plot
+```
